@@ -37,13 +37,11 @@ const createBadRequestError = (message) => {
 
 const buildPagination = (pagination = {}) => ({
   itemsPerPage: toPositiveInteger(
-    pagination.itemsPerPage || pagination.limit || pagination.pageSize,
+    pagination.itemsPerPage,
     DEFAULT_ITEMS_PER_PAGE,
   ),
   page: toPositiveInteger(pagination.page, 1),
-  pageToken: normalizeString(
-    pagination.pageToken || pagination.nextToken || pagination.cursor,
-  ),
+  nextToken: normalizeString(pagination.nextToken),
 });
 
 const buildFiltersFromSource = (source = {}) => {
@@ -53,7 +51,7 @@ const buildFiltersFromSource = (source = {}) => {
 
   const filters = [{ searchFilterItems: [] }];
   const searchFilterItems = filters[0].searchFilterItems;
-  const iataCode = source.iataCode || source.iata;
+  const iataCode = source.iataCode;
 
   if (iataCode) {
     searchFilterItems.push({ type: "iataCode", value: toUpper(iataCode) });
@@ -133,7 +131,7 @@ const runPagedQuery = async (queryInput, pagination) => {
     new QueryCommand({
       ...queryInput,
       Limit: pagination.itemsPerPage,
-      ExclusiveStartKey: decodePageToken(pagination.pageToken),
+      ExclusiveStartKey: decodePageToken(pagination.nextToken),
     }),
   );
 
@@ -148,7 +146,7 @@ const runPagedScan = async (pagination) => {
     new ScanCommand({
       TableName: tableName,
       Limit: pagination.itemsPerPage,
-      ExclusiveStartKey: decodePageToken(pagination.pageToken),
+      ExclusiveStartKey: decodePageToken(pagination.nextToken),
     }),
   );
 
@@ -160,7 +158,6 @@ const runPagedScan = async (pagination) => {
 
 const buildAirportItem = (airport) => {
   const iataCode = toUpper(airport.iataCode);
-  const icao = toUpper(airport.icao);
   const airportName = normalizeString(airport.airportName);
   const city = normalizeString(airport.city);
   const country = normalizeString(airport.country);
@@ -169,7 +166,6 @@ const buildAirportItem = (airport) => {
 
   return {
     iataCode,
-    icao: icao || undefined,
     airportName,
     city,
     country,
@@ -218,8 +214,8 @@ export const listAirportCodes = async (source = {}) => {
     validateSupportedFilters(searchFilterItems);
   }
 
-  if (searchPayload.pagination.page > 1 && !searchPayload.pagination.pageToken) {
-    throw createBadRequestError("Use nextToken/pageToken for pagination beyond the first page.");
+  if (searchPayload.pagination.page > 1 && !searchPayload.pagination.nextToken) {
+    throw createBadRequestError("Use nextToken for pagination beyond the first page.");
   }
 
   const hasOnlyIataFilter =
@@ -317,7 +313,6 @@ export const updateAirportCode = async (country, city, updates) => {
   const attributeValues = {};
   const fields = {
     iataCode: "iataCode",
-    icao: "icao",
     airportName: "airportName",
     countryCode: "countryCode",
   };
@@ -329,7 +324,7 @@ export const updateAirportCode = async (country, city, updates) => {
 
     const value = updates[payloadKey];
     const normalizedValue =
-      fieldName === "iataCode" || fieldName === "icao"
+      fieldName === "iataCode"
         ? toUpper(value)
         : normalizeString(value);
 

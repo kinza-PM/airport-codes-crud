@@ -1,0 +1,172 @@
+service: airport-codes-crud
+frameworkVersion: '3'
+useDotenv: true
+
+custom:
+  serverless-offline:
+    httpPort: 3000
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: ${env:AWS_REGION}
+  stage: ${opt:stage, 'dev'}
+
+  environment:
+    STAGE: ${self:provider.stage}
+    AIRPORT_TABLE: ${env:AIRPORT_TABLE}
+    AWS_REGION: ${env:AWS_REGION}
+
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:PutItem
+            - dynamodb:GetItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+            - dynamodb:Query
+            - dynamodb:Scan
+          Resource:
+            - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.AIRPORT_TABLE}
+            - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.AIRPORT_TABLE}/index/GSI_IATA_CODE
+            - arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.AIRPORT_TABLE}/index/GSI_LowerCountry_LowerCity
+
+package:
+  patterns:
+    - '!./**' # 1. EXCLUDE EVERYTHING in the current directory
+
+    # 2. INCLUDE ALL SOURCE CODE AND CONFIG FILES
+    - handlers/** # Your Lambda handler files
+    - services/** # Your service layer code
+    - lib/** # Your library code
+    - package.json # Required for dependency resolution
+    - package-lock.json # Highly recommended for predictable deployments
+
+    # 3. INCLUDE ALL PRODUCTION DEPENDENCIES
+    - node_modules/** # All production dependencies
+
+    # 4. EXCLUSIONS (Cleanup)
+    - '!node_modules/aws-sdk/**' # Exclude AWS SDK (provided by Lambda runtime)
+    - '!node_modules/**/test/**' # Exclude test folders/files
+    - '!node_modules/**/tests/**'
+    - '!node_modules/**/docs/**'
+    - '!node_modules/**/examples/**'
+    - '!node_modules/**/*.md' # Exclude Markdown files
+    - '!node_modules/**/*.ts' # Exclude TypeScript source files
+    - '!node_modules/**/*.map' # Exclude source maps
+  excludeDevDependencies: true # Automatically excludes devDependencies listed in package.json
+
+functions:
+  createAirportCode:
+    handler: handlers/airportCodes.createAirportCode
+    timeout: 30 # API Gateway limit
+    memorySize: 512
+    events:
+      - http:
+          path: /airport-codes
+          method: post
+          cors:
+            origin: '*'
+            headers:
+              - Content-Type
+            allowCredentials: false
+
+  listAirportCodes:
+    handler: handlers/airportCodes.listAirportCodes
+    timeout: 30 # API Gateway limit
+    memorySize: 512
+    events:
+      - http:
+          path: /airport-codes
+          method: get
+          cors:
+            origin: '*'
+            headers:
+              - Content-Type
+            allowCredentials: false
+
+  getAirportCode:
+    handler: handlers/airportCodes.getAirportCode
+    timeout: 30 # API Gateway limit
+    memorySize: 512
+    events:
+      - http:
+          path: /airport-codes/{country}/{city}
+          method: get
+          cors:
+            origin: '*'
+            headers:
+              - Content-Type
+            allowCredentials: false
+
+  updateAirportCode:
+    handler: handlers/airportCodes.updateAirportCode
+    timeout: 30 # API Gateway limit
+    memorySize: 512
+    events:
+      - http:
+          path: /airport-codes/{country}/{city}
+          method: put
+          cors:
+            origin: '*'
+            headers:
+              - Content-Type
+            allowCredentials: false
+
+  deleteAirportCode:
+    handler: handlers/airportCodes.deleteAirportCode
+    timeout: 30 # API Gateway limit
+    memorySize: 512
+    events:
+      - http:
+          path: /airport-codes/{country}/{city}
+          method: delete
+          cors:
+            origin: '*'
+            headers:
+              - Content-Type
+            allowCredentials: false
+
+resources:
+  Resources:
+    AirportCodesTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.AIRPORT_TABLE}
+        AttributeDefinitions:
+          - AttributeName: country
+            AttributeType: S
+          - AttributeName: city
+            AttributeType: S
+          - AttributeName: iataCode
+            AttributeType: S
+          - AttributeName: lowerCountry
+            AttributeType: S
+          - AttributeName: lowerCity
+            AttributeType: S
+        KeySchema:
+          - AttributeName: country
+            KeyType: HASH
+          - AttributeName: city
+            KeyType: RANGE
+        BillingMode: PAY_PER_REQUEST
+        GlobalSecondaryIndexes:
+          - IndexName: GSI_IATA_CODE
+            KeySchema:
+              - AttributeName: iataCode
+                KeyType: HASH
+            Projection:
+              ProjectionType: ALL
+          - IndexName: GSI_LowerCountry_LowerCity
+            KeySchema:
+              - AttributeName: lowerCountry
+                KeyType: HASH
+              - AttributeName: lowerCity
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+
+plugins:
+  - serverless-offline

@@ -23,7 +23,8 @@ const DEFAULT_ITEMS_PER_PAGE = 99;
 const STATUS_ACTIVE = "active";
 const STATUS_DELETED = "inactive";
 
-const normalizeString = (value) => (typeof value === "string" ? value.trim() : "");
+const normalizeString = (value) =>
+  typeof value === "string" ? value.trim() : "";
 const toUpper = (value) => normalizeString(value).toUpperCase();
 const toLower = (value) => normalizeString(value).toLowerCase();
 
@@ -67,11 +68,17 @@ const buildFiltersFromSource = (source = {}) => {
   }
 
   if (source.country) {
-    searchFilterItems.push({ type: "country", value: normalizeString(source.country) });
+    searchFilterItems.push({
+      type: "country",
+      value: normalizeString(source.country),
+    });
   }
 
   if (source.city) {
-    searchFilterItems.push({ type: "city", value: normalizeString(source.city) });
+    searchFilterItems.push({
+      type: "city",
+      value: normalizeString(source.city),
+    });
   }
 
   return filters;
@@ -80,10 +87,13 @@ const buildFiltersFromSource = (source = {}) => {
 const buildSearchPayload = (source = {}) => {
   const pagination = buildPagination(source.pagination || source);
   const filters = buildFiltersFromSource(source);
-  const order = normalizeString(source.order || "DEFAULT").toUpperCase() || "DEFAULT";
+  const order =
+    normalizeString(source.order || "DEFAULT").toUpperCase() || "DEFAULT";
 
   if (!["DEFAULT", "ASC", "DESC"].includes(order)) {
-    throw createBadRequestError("Bad Request: 'order' should be either 'DEFAULT', 'ASC', or 'DESC' only.");
+    throw createBadRequestError(
+      "Bad Request: 'order' should be either 'DEFAULT', 'ASC', or 'DESC' only.",
+    );
   }
 
   return {
@@ -93,13 +103,16 @@ const buildSearchPayload = (source = {}) => {
   };
 };
 
-const getSearchFilterItems = (searchPayload) => searchPayload.filters[0]?.searchFilterItems || [];
+const getSearchFilterItems = (searchPayload) =>
+  searchPayload.filters[0]?.searchFilterItems || [];
 const getFilterValue = (searchFilterItems, type) =>
   searchFilterItems.find((item) => item.type === type)?.value;
 
 const validateSupportedFilters = (searchFilterItems) => {
   const supportedTypes = new Set(["iataCode", "country", "city"]);
-  const unsupportedFilter = searchFilterItems.find((item) => !supportedTypes.has(item.type));
+  const unsupportedFilter = searchFilterItems.find(
+    (item) => !supportedTypes.has(item.type),
+  );
 
   if (unsupportedFilter) {
     throw createBadRequestError(
@@ -126,7 +139,9 @@ const encodePageToken = (lastEvaluatedKey) => {
     return null;
   }
 
-  return Buffer.from(JSON.stringify(lastEvaluatedKey), "utf8").toString("base64url");
+  return Buffer.from(JSON.stringify(lastEvaluatedKey), "utf8").toString(
+    "base64url",
+  );
 };
 
 const buildPaginationResponse = (pagination, lastEvaluatedKey) => ({
@@ -222,7 +237,8 @@ const findAirportCodeByCountryCity = async (country, city) => {
     {
       TableName: tableName,
       IndexName: "GSI_LowerCountry_LowerCity",
-      KeyConditionExpression: "lowerCountry = :lowerCountry AND lowerCity = :lowerCity",
+      KeyConditionExpression:
+        "lowerCountry = :lowerCountry AND lowerCity = :lowerCity",
       ExpressionAttributeValues: marshall({
         ":lowerCountry": normalizedCountry,
         ":lowerCity": normalizedCity,
@@ -242,7 +258,10 @@ const isDeletedItem = (item) => item?.status === STATUS_DELETED;
 const buildAirportItem = (airport) => {
   const iataCode = toUpper(airport.iataCode);
   const airportName = normalizeString(airport.airportName);
-  const city = normalizeString(airport.city);
+  const city =
+    airport.city && airport.iataCode
+      ? `${normalizeString(airport.city)}-${iataCode}`
+      : "UNKNOWN";
   const country = normalizeString(airport.country);
   const countryCode = normalizeString(airport.countryCode);
   const now = new Date().toISOString();
@@ -269,7 +288,8 @@ export const createAirportCode = async (airport) => {
     new PutItemCommand({
       TableName: tableName,
       Item: marshall(item, { removeUndefinedValues: true }),
-      ConditionExpression: "attribute_not_exists(#country) AND attribute_not_exists(#city)",
+      ConditionExpression:
+        "attribute_not_exists(#country) AND attribute_not_exists(#city)",
       ExpressionAttributeNames: {
         "#country": "country",
         "#city": "city",
@@ -299,14 +319,21 @@ export const listAirportCodes = async (source = {}) => {
     validateSupportedFilters(searchFilterItems);
   }
 
-  if (searchPayload.pagination.page > 1 && !searchPayload.pagination.nextToken) {
-    throw createBadRequestError("Use nextToken for pagination beyond the first page.");
+  if (
+    searchPayload.pagination.page > 1 &&
+    !searchPayload.pagination.nextToken
+  ) {
+    throw createBadRequestError(
+      "Use nextToken for pagination beyond the first page.",
+    );
   }
 
   const hasOnlyIataFilter =
     searchFilterItems.length > 0 &&
     searchFilterItems.every((item) => item.type === "iataCode");
-  const hasCountryFilter = searchFilterItems.some((item) => item.type === "country");
+  const hasCountryFilter = searchFilterItems.some(
+    (item) => item.type === "country",
+  );
   const hasCityFilter = searchFilterItems.some((item) => item.type === "city");
   const hasOnlyCountryCityFilters =
     searchFilterItems.length > 0 &&
@@ -335,7 +362,9 @@ export const listAirportCodes = async (source = {}) => {
     let keyConditionExpression = "lowerCountry = :lowerCountry";
 
     if (hasCityFilter) {
-      expressionAttributeValues[":lowerCity"] = toLower(getFilterValue(searchFilterItems, "city"));
+      expressionAttributeValues[":lowerCity"] = toLower(
+        getFilterValue(searchFilterItems, "city"),
+      );
       keyConditionExpression += " AND lowerCity = :lowerCity";
     }
 
@@ -421,9 +450,7 @@ export const updateAirportCode = async (country, city, updates) => {
 
     const value = updates[payloadKey];
     const normalizedValue =
-      fieldName === "iataCode"
-        ? toUpper(value)
-        : normalizeString(value);
+      fieldName === "iataCode" ? toUpper(value) : normalizeString(value);
 
     expression.push(`#${fieldName} = :${fieldName}`);
     attributeNames[`#${fieldName}`] = fieldName;
@@ -458,7 +485,8 @@ export const updateAirportCode = async (country, city, updates) => {
         "#city": "city",
       },
       ExpressionAttributeValues: marshall(attributeValues),
-      ConditionExpression: "attribute_exists(#country) AND attribute_exists(#city)",
+      ConditionExpression:
+        "attribute_exists(#country) AND attribute_exists(#city)",
       ReturnValues: "ALL_NEW",
     }),
   );

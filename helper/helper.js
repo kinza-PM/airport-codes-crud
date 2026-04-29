@@ -1,4 +1,8 @@
-import { buildAirportItemCacheKey, buildAirportListCacheKey } from "../lib/cacheKey.js";
+import {
+  buildAirportItemCacheKey,
+  buildAirportItemIataCacheKey,
+  buildAirportListCacheKey,
+} from "../lib/cacheKey.js";
 import {
   deleteCacheValue,
   deleteCacheValuesByPrefix,
@@ -61,6 +65,15 @@ export const setCachedAirportItem = async (country, city, value) =>
 
 export const deleteCachedAirportItem = async (country, city) =>
   deleteCacheValue(buildAirportItemCacheKey(country, city));
+
+export const getCachedAirportItemByIata = async (iataCode) =>
+  getCacheValue(buildAirportItemIataCacheKey(iataCode));
+
+export const setCachedAirportItemByIata = async (iataCode, value) =>
+  setCacheValue(buildAirportItemIataCacheKey(iataCode), value);
+
+export const deleteCachedAirportItemByIata = async (iataCode) =>
+  deleteCacheValue(buildAirportItemIataCacheKey(iataCode));
 
 export const getCachedAirportList = async (payload) =>
   getCacheValue(buildAirportListCacheKey(payload));

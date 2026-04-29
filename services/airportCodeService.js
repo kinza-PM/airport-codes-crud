@@ -1,5 +1,4 @@
 import {
-  DeleteItemCommand,
   GetItemCommand,
   PutItemCommand,
   QueryCommand,
@@ -9,16 +8,20 @@ import {
 import { marshall, unmarshall } from "@aws-sdk/util-dynamodb";
 import {
   deleteCachedAirportItem,
-  getCachedAirportItem,
+  deleteCachedAirportItemByIata,
+  getCachedAirportItemByIata,
   getCachedAirportList,
   invalidateAirportListCache,
   setCachedAirportItem,
+  setCachedAirportItemByIata,
   setCachedAirportList,
 } from "../helper/helper.js";
 import { dynamoDb } from "../lib/dynamoClient.js";
 
 const tableName = process.env.AIRPORT_TABLE;
 const DEFAULT_ITEMS_PER_PAGE = 99;
+const STATUS_ACTIVE = "active";
+const STATUS_DELETED = "inactive";
 
 const normalizeString = (value) => (typeof value === "string" ? value.trim() : "");
 const toUpper = (value) => normalizeString(value).toUpperCase();
@@ -32,6 +35,12 @@ const toPositiveInteger = (value, fallback) => {
 const createBadRequestError = (message) => {
   const error = new Error(message);
   error.statusCode = 400;
+  return error;
+};
+
+const createNotFoundError = (message) => {
+  const error = new Error(message);
+  error.code = "ConditionalCheckFailedException";
   return error;
 };
 
@@ -126,10 +135,34 @@ const buildPaginationResponse = (pagination, lastEvaluatedKey) => ({
   hasMore: Boolean(lastEvaluatedKey),
 });
 
+const activeStatusFilterExpression =
+  "(attribute_not_exists(#status) OR #status = :activeStatus)";
+
+const activeStatusFilterNames = {
+  "#status": "status",
+};
+
+const activeStatusFilterValues = {
+  ":activeStatus": STATUS_ACTIVE,
+};
+
 const runPagedQuery = async (queryInput, pagination) => {
   const result = await dynamoDb.send(
     new QueryCommand({
       ...queryInput,
+      FilterExpression: queryInput.FilterExpression
+        ? `(${queryInput.FilterExpression}) AND ${activeStatusFilterExpression}`
+        : activeStatusFilterExpression,
+      ExpressionAttributeNames: {
+        ...queryInput.ExpressionAttributeNames,
+        ...activeStatusFilterNames,
+      },
+      ExpressionAttributeValues: marshall({
+        ...(queryInput.ExpressionAttributeValues
+          ? unmarshall(queryInput.ExpressionAttributeValues)
+          : {}),
+        ...activeStatusFilterValues,
+      }),
       Limit: pagination.itemsPerPage,
       ExclusiveStartKey: decodePageToken(pagination.nextToken),
     }),
@@ -145,6 +178,9 @@ const runPagedScan = async (pagination) => {
   const result = await dynamoDb.send(
     new ScanCommand({
       TableName: tableName,
+      FilterExpression: activeStatusFilterExpression,
+      ExpressionAttributeNames: activeStatusFilterNames,
+      ExpressionAttributeValues: marshall(activeStatusFilterValues),
       Limit: pagination.itemsPerPage,
       ExclusiveStartKey: decodePageToken(pagination.nextToken),
     }),
@@ -155,6 +191,53 @@ const runPagedScan = async (pagination) => {
     pagination: buildPaginationResponse(pagination, result.LastEvaluatedKey),
   };
 };
+
+const getAirportCodeByKey = async (country, city) => {
+  const result = await dynamoDb.send(
+    new GetItemCommand({
+      TableName: tableName,
+      Key: marshall({
+        country: normalizeString(country),
+        city: normalizeString(city),
+      }),
+    }),
+  );
+
+  return result.Item ? unmarshall(result.Item) : undefined;
+};
+
+const findAirportCodeByCountryCity = async (country, city) => {
+  const directItem = await getAirportCodeByKey(country, city);
+  if (directItem) {
+    return directItem;
+  }
+
+  const normalizedCountry = toLower(country);
+  const normalizedCity = toLower(city);
+  if (!normalizedCountry || !normalizedCity) {
+    return undefined;
+  }
+
+  const result = await runPagedQuery(
+    {
+      TableName: tableName,
+      IndexName: "GSI_LowerCountry_LowerCity",
+      KeyConditionExpression: "lowerCountry = :lowerCountry AND lowerCity = :lowerCity",
+      ExpressionAttributeValues: marshall({
+        ":lowerCountry": normalizedCountry,
+        ":lowerCity": normalizedCity,
+      }),
+    },
+    {
+      itemsPerPage: 1,
+      nextToken: "",
+    },
+  );
+
+  return result.items[0];
+};
+
+const isDeletedItem = (item) => item?.status === STATUS_DELETED;
 
 const buildAirportItem = (airport) => {
   const iataCode = toUpper(airport.iataCode);
@@ -173,6 +256,7 @@ const buildAirportItem = (airport) => {
     lowerAirportName: toLower(airportName),
     lowerCity: toLower(city),
     lowerCountry: toLower(country),
+    status: STATUS_ACTIVE,
     updatedAt: now,
     createdAt: now,
   };
@@ -195,6 +279,7 @@ export const createAirportCode = async (airport) => {
 
   await invalidateAirportListCache();
   await setCachedAirportItem(item.country, item.city, item);
+  await setCachedAirportItemByIata(item.iataCode, item);
 
   return item;
 };
@@ -282,32 +367,44 @@ export const listAirportCodes = async (source = {}) => {
   return response;
 };
 
-export const getAirportCode = async (country, city) => {
-  const cachedItem = await getCachedAirportItem(country, city);
-  if (cachedItem) {
+export const getAirportCode = async (iataCode) => {
+  const normalizedIataCode = toUpper(iataCode);
+  const cachedItem = await getCachedAirportItemByIata(normalizedIataCode);
+  if (cachedItem && !isDeletedItem(cachedItem)) {
     return cachedItem;
   }
 
-  const result = await dynamoDb.send(
-    new GetItemCommand({
+  const result = await runPagedQuery(
+    {
       TableName: tableName,
-      Key: marshall({
-        country: normalizeString(country),
-        city: normalizeString(city),
+      IndexName: "GSI_IATA_CODE",
+      KeyConditionExpression: "iataCode = :iataCode",
+      ExpressionAttributeValues: marshall({
+        ":iataCode": normalizedIataCode,
       }),
-    }),
+    },
+    {
+      itemsPerPage: 1,
+      nextToken: "",
+    },
   );
 
-  const item = result.Item ? unmarshall(result.Item) : undefined;
+  const item = result.items[0];
 
   if (item) {
-    await setCachedAirportItem(country, city, item);
+    await setCachedAirportItem(item.country, item.city, item);
+    await setCachedAirportItemByIata(normalizedIataCode, item);
   }
 
   return item;
 };
 
 export const updateAirportCode = async (country, city, updates) => {
+  const existingItem = await findAirportCodeByCountryCity(country, city);
+  if (!existingItem || isDeletedItem(existingItem)) {
+    throw createNotFoundError(`Airport code for ${country}/${city} not found.`);
+  }
+
   const expression = [];
   const attributeNames = {};
   const attributeValues = {};
@@ -351,8 +448,8 @@ export const updateAirportCode = async (country, city, updates) => {
     new UpdateItemCommand({
       TableName: tableName,
       Key: marshall({
-        country: normalizeString(country),
-        city: normalizeString(city),
+        country: existingItem.country,
+        city: existingItem.city,
       }),
       UpdateExpression: `SET ${expression.join(", ")}`,
       ExpressionAttributeNames: {
@@ -367,32 +464,53 @@ export const updateAirportCode = async (country, city, updates) => {
   );
 
   const item = result.Attributes ? unmarshall(result.Attributes) : undefined;
-  await deleteCachedAirportItem(country, city);
+  await deleteCachedAirportItem(existingItem.country, existingItem.city);
+  if (existingItem?.iataCode) {
+    await deleteCachedAirportItemByIata(existingItem.iataCode);
+  }
   await invalidateAirportListCache();
 
   if (item) {
     await setCachedAirportItem(item.country, item.city, item);
+    await setCachedAirportItemByIata(item.iataCode, item);
   }
 
   return item;
 };
 
 export const deleteAirportCode = async (country, city) => {
+  const existingItem = await findAirportCodeByCountryCity(country, city);
+  if (!existingItem || isDeletedItem(existingItem)) {
+    throw createNotFoundError(`Airport code for ${country}/${city} not found.`);
+  }
+
   await dynamoDb.send(
-    new DeleteItemCommand({
+    new UpdateItemCommand({
       TableName: tableName,
       Key: marshall({
-        country: normalizeString(country),
-        city: normalizeString(city),
+        country: existingItem.country,
+        city: existingItem.city,
       }),
-      ConditionExpression: "attribute_exists(#country) AND attribute_exists(#city)",
+      UpdateExpression: "SET #status = :deletedStatus, #updatedAt = :updatedAt",
+      ConditionExpression:
+        "attribute_exists(#country) AND attribute_exists(#city) AND (attribute_not_exists(#status) OR #status = :activeStatus)",
       ExpressionAttributeNames: {
         "#country": "country",
         "#city": "city",
+        "#status": "status",
+        "#updatedAt": "updatedAt",
       },
+      ExpressionAttributeValues: marshall({
+        ":deletedStatus": STATUS_DELETED,
+        ":updatedAt": new Date().toISOString(),
+        ":activeStatus": STATUS_ACTIVE,
+      }),
     }),
   );
 
-  await deleteCachedAirportItem(country, city);
+  await deleteCachedAirportItem(existingItem.country, existingItem.city);
+  if (existingItem?.iataCode) {
+    await deleteCachedAirportItemByIata(existingItem.iataCode);
+  }
   await invalidateAirportListCache();
 };

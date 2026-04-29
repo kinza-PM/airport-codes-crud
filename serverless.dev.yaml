@@ -4,7 +4,9 @@ useDotenv: true
 
 custom:
   serverless-offline:
-    httpPort: 3000
+  prune:
+    automatic: true
+    number: 3
 
 provider:
   name: aws
@@ -14,7 +16,7 @@ provider:
 
   environment:
     STAGE: ${self:provider.stage}
-    AIRPORT_TABLE: ${env:AIRPORT_TABLE}
+    AIRPORT_TABLE: countries-listing-dev
     AWS_REGION: ${env:AWS_REGION}
 
   iam:
@@ -39,6 +41,7 @@ package:
 
     # 2. INCLUDE ALL SOURCE CODE AND CONFIG FILES
     - handlers/** # Your Lambda handler files
+    - helper/** # Shared helper utilities used by handlers and services
     - services/** # Your service layer code
     - lib/** # Your library code
     - package.json # Required for dependency resolution
@@ -60,7 +63,7 @@ package:
 
 functions:
   createAirportCode:
-    handler: handlers/airportCodes.createAirportCode
+    handler: handlers/createAirportCode.handler
     timeout: 30 # API Gateway limit
     memorySize: 512
     events:
@@ -74,7 +77,7 @@ functions:
             allowCredentials: false
 
   listAirportCodes:
-    handler: handlers/airportCodes.listAirportCodes
+    handler: handlers/listAirportCodes.handler
     timeout: 30 # API Gateway limit
     memorySize: 512
     events:
@@ -88,12 +91,12 @@ functions:
             allowCredentials: false
 
   getAirportCode:
-    handler: handlers/airportCodes.getAirportCode
+    handler: handlers/getAirportCode.handler
     timeout: 30 # API Gateway limit
     memorySize: 512
     events:
       - http:
-          path: /airport-codes/{country}/{city}
+          path: /airport-codes/{iataCode}
           method: get
           cors:
             origin: '*'
@@ -102,7 +105,7 @@ functions:
             allowCredentials: false
 
   updateAirportCode:
-    handler: handlers/airportCodes.updateAirportCode
+    handler: handlers/updateAirportCode.handler
     timeout: 30 # API Gateway limit
     memorySize: 512
     events:
@@ -116,7 +119,7 @@ functions:
             allowCredentials: false
 
   deleteAirportCode:
-    handler: handlers/airportCodes.deleteAirportCode
+    handler: handlers/deleteAirportCode.handler
     timeout: 30 # API Gateway limit
     memorySize: 512
     events:
@@ -129,44 +132,6 @@ functions:
               - Content-Type
             allowCredentials: false
 
-resources:
-  Resources:
-    AirportCodesTable:
-      Type: AWS::DynamoDB::Table
-      Properties:
-        TableName: ${self:provider.environment.AIRPORT_TABLE}
-        AttributeDefinitions:
-          - AttributeName: country
-            AttributeType: S
-          - AttributeName: city
-            AttributeType: S
-          - AttributeName: iataCode
-            AttributeType: S
-          - AttributeName: lowerCountry
-            AttributeType: S
-          - AttributeName: lowerCity
-            AttributeType: S
-        KeySchema:
-          - AttributeName: country
-            KeyType: HASH
-          - AttributeName: city
-            KeyType: RANGE
-        BillingMode: PAY_PER_REQUEST
-        GlobalSecondaryIndexes:
-          - IndexName: GSI_IATA_CODE
-            KeySchema:
-              - AttributeName: iataCode
-                KeyType: HASH
-            Projection:
-              ProjectionType: ALL
-          - IndexName: GSI_LowerCountry_LowerCity
-            KeySchema:
-              - AttributeName: lowerCountry
-                KeyType: HASH
-              - AttributeName: lowerCity
-                KeyType: RANGE
-            Projection:
-              ProjectionType: ALL
-
 plugins:
   - serverless-offline
+  - serverless-prune-plugin

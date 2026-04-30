@@ -23,8 +23,22 @@ const DEFAULT_ITEMS_PER_PAGE = 99;
 const STATUS_ACTIVE = "active";
 const STATUS_DELETED = "inactive";
 
-const normalizeString = (value) =>
-  typeof value === "string" ? value.trim() : "";
+const normalizeString = (value) => {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const trimmedValue = value.trim();
+  if (!trimmedValue) {
+    return "";
+  }
+
+  try {
+    return decodeURIComponent(trimmedValue.replace(/\+/g, " "));
+  } catch {
+    return trimmedValue;
+  }
+};
 const toUpper = (value) => normalizeString(value).toUpperCase();
 const toLower = (value) => normalizeString(value).toLowerCase();
 

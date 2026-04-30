@@ -11,13 +11,13 @@ custom:
 provider:
   name: aws
   runtime: nodejs20.x
-  region: ${env:AWS_REGION}
+  region: eu-west-1
   stage: ${opt:stage, 'dev'}
 
   environment:
     STAGE: ${self:provider.stage}
-    AIRPORT_TABLE: countries-listing-dev
-    AWS_REGION: ${env:AWS_REGION}
+    AIRPORT_TABLE: countries-listing-${self:provider.stage}
+    REGION: ${aws:region}
 
   iam:
     role:
@@ -110,7 +110,7 @@ functions:
     memorySize: 512
     events:
       - http:
-          path: /airport-codes/{country}/{city}
+          path: /airport-codes/update/{country}/{city}
           method: put
           cors:
             origin: '*'
@@ -124,7 +124,7 @@ functions:
     memorySize: 512
     events:
       - http:
-          path: /airport-codes/{country}/{city}
+          path: /airport-codes/delete/{country}/{city}
           method: delete
           cors:
             origin: '*'

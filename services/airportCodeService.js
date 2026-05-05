@@ -275,7 +275,7 @@ const buildAirportItem = (airport) => {
   const city =
     airport.city && airport.iataCode
       ? `${normalizeString(airport.city)}-${iataCode}`
-      : "UNKNOWN";
+      : `UNKNOWN-${airport.iataCode}`;
   const country = normalizeString(airport.country);
   const countryCode = normalizeString(airport.countryCode);
   const now = new Date().toISOString();

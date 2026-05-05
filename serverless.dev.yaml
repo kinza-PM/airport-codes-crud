@@ -17,7 +17,7 @@ provider:
   environment:
     STAGE: ${self:provider.stage}
     AIRPORT_TABLE: countries-listing-${self:provider.stage}
-    REGION: ${aws:region}
+    REGION: ${self:provider.region}
 
   iam:
     role:
